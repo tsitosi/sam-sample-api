@@ -9,7 +9,7 @@ const createResponse = (statusCode, body) => ({ statusCode, body });
 
 const get = (event, context, callback) => {
 
-    console.log(`Siarhei is a cheap ass`);
+    console.log(`Michael is a sloth!`);
 
     const params = {
         TableName: tableName,
