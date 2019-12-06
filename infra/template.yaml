@@ -19,7 +19,7 @@ Parameters:
       - "prod"
       - "dev"
     Default: "dev"
-  
+
 Conditions:
   IsProd:
     Fn::Equals:
@@ -82,7 +82,7 @@ Resources:
       WebsiteConfiguration:
         IndexDocument: "index.html"
         ErrorDocument: "error.html"
-  
+
   FrontendS3BucketPolicy:
     Condition: "IsProd"
     Type: "AWS::S3::BucketPolicy"
@@ -97,14 +97,14 @@ Resources:
             Effect: "Allow"
             Principal:
               CanonicalUser:
-                Fn::GetAtt: 
+                Fn::GetAtt:
                   - "CloudFrontOriginalAccessIdentity"
                   - "S3CanonicalUserId"
             Action: "s3:GetObject"
             Resource:
               - Fn::Sub: "${FrontendS3Bucket.Arn}"
               - Fn::Sub: "${FrontendS3Bucket.Arn}/*"
- 
+
   CloudFrontOriginalAccessIdentity:
     Condition: "IsProd"
     Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
@@ -121,8 +121,8 @@ Resources:
         Origins:
           - DomainName:
               Fn::GetAtt:
-                  - "FrontendS3Bucket"
-                  - "DomainName"
+                - "FrontendS3Bucket"
+                - "DomainName"
             Id: "frontend_s3_bucket"
             S3OriginConfig:
               OriginAccessIdentity:

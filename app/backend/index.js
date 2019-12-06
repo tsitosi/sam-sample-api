@@ -8,7 +8,9 @@ const tableName = process.env.TABLE_NAME;
 const createResponse = (statusCode, body) => ({ statusCode, body });
 
 const get = (event, context, callback) => {
-    
+
+    console.log(`Siarhei is a cheap ass`);
+
     const params = {
         TableName: tableName,
         Key: {
