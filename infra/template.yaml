@@ -90,7 +90,7 @@ Resources:
       Bucket:
         Ref: "FrontendS3Bucket"
       PolicyDocument:
-        Version: "2008-10-17"
+        Version: "2012-10-17"
         Id: "PolicyForCloudFrontPrivateContent"
         Statement:
           - Sid: "AllowsCloudFrontAccessS3FrontendBucket"
