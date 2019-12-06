@@ -2,7 +2,7 @@
 
 CFN_STACK_NAME="myApi"
 AWS_REGION="eu-west-1"
-ARTIFICAT_BUCKET="marcuram-ireland"
+ARTIFICAT_BUCKET="BUCKET-NAME"
 
 # PACKAGE
 sam package --template-file infra/template.yaml \
