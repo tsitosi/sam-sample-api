@@ -387,11 +387,10 @@ Resources:
               commands:
                 - "pip install aws-sam-cli"
                 - "pip install cfn-lint"
-                - "ls -lhatr"
-                - "cfn-lint template.yaml"
+                - "cfn-lint infra/template.yaml"
             build:
               commands:
-                - "sam package --template-file template.yaml --s3-bucket ${ARTIFACT_BUCKET} --output-template-file packaged.yaml --region ${AWS_REGION}"
+                - "sam package --template-file infra/template.yaml --s3-bucket ${ARTIFACT_BUCKET} --output-template-file packaged.yaml --region ${AWS_REGION}"
             post_build:
               commands:
                 - "echo done"
