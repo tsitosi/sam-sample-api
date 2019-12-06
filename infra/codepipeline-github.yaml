@@ -15,7 +15,7 @@ Parameters:
 
   GitHubOwner:
     Type: "String"
-    Default: "marcuram"
+    Default: "mvinii94"
 
   GitHubOAuthToken:
     Type: "String"
@@ -78,7 +78,7 @@ Resources:
     Type: "AWS::SNS::Topic"
     Properties:
       Subscription:
-        - Endpoint: "marcuram@amazon.com"
+        - Endpoint: "email@email.com"
           Protocol: "email"
   
   AppPipeline:

@@ -10,7 +10,7 @@ Parameters:
   DomainName:
     Type: "String"
     Description: "Frontend domain name."
-    Default: "marcuram.myinstance.com"
+    Default: "domain.com"
 
   # EnvironmentType:
   #   Type: "String"
