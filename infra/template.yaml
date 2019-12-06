@@ -12,12 +12,19 @@ Parameters:
     Description: "Frontend domain name."
     Default: "domain.com"
 
-  # EnvironmentType:
-  #   Type: "String"
-  #   Description: "Environment Type"
-  #   AllowedValues:
-  #     - "prod"
-  #     - "dev"
+  EnvironmentType:
+    Type: "String"
+    Description: "Environment Type"
+    AllowedValues:
+      - "prod"
+      - "dev"
+    Default: "dev"
+  
+Conditions:
+  IsProd:
+    Fn::Equals:
+      - Ref: "EnvironmentType"
+      - "prod"
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -65,6 +72,7 @@ Resources:
         SSEEnabled: true
 
   FrontendS3Bucket:
+    Condition: "IsProd"
     Type: "AWS::S3::Bucket"
     # DeletionPolicy: "Retain"
     Properties:
@@ -76,6 +84,7 @@ Resources:
         ErrorDocument: "error.html"
   
   FrontendS3BucketPolicy:
+    Condition: "IsProd"
     Type: "AWS::S3::BucketPolicy"
     Properties:
       Bucket:
@@ -97,12 +106,14 @@ Resources:
               - Fn::Sub: "${FrontendS3Bucket.Arn}/*"
  
   CloudFrontOriginalAccessIdentity:
+    Condition: "IsProd"
     Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
     Properties:
       CloudFrontOriginAccessIdentityConfig:
         Comment: "Allows private communication with Frontend S3 Bucket"
 
   FrontendCloudFront:
+    Condition: "IsProd"
     Type: "AWS::CloudFront::Distribution"
     Properties:
       DistributionConfig:
@@ -132,6 +143,7 @@ Outputs:
       Fn::Sub: "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/item/"
 
   CloudFrontURL:
+    Condition: "IsProd"
     Value:
       Fn::GetAtt:
         - "FrontendCloudFront"
