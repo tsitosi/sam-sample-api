@@ -1,0 +1,412 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+
+  BranchName:
+    Description: "GitHub branch name"
+    Type: "String"
+    Default: "master"
+
+  RepositoryName:
+    Description: "GitHub repository name"
+    Type: "String"
+    Default: "sam-sample-api"
+
+  GitHubOwner:
+    Type: "String"
+    Default: "marcuram"
+
+  GitHubOAuthToken:
+    Type: "String"
+    NoEcho: true
+    MinLength: 40
+    MaxLength: 40
+    AllowedPattern: "[a-z0-9]*"
+
+Resources:
+
+  CodePipelineArtifactStoreBucket:
+    Type: "AWS::S3::Bucket"
+
+  CodePipelineArtifactStoreBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket:
+        Ref: "CodePipelineArtifactStoreBucket"
+      PolicyDocument:
+        Version: 2012-10-17
+        Id: "SSEAndSSLPolicy"
+        Statement:
+        - Action:
+          - "s3:GetObject"
+          - "s3:GetObjectVersion"
+          - "s3:GetBucketVersioning"
+          Condition:
+            Bool:
+              aws:SecureTransport: false
+          Effect: "Allow"
+          Principal:
+            AWS:
+              - Fn::GetAtt:
+                  - "CodePipelineServiceRole"
+                  - "Arn"
+              - Fn::GetAtt:
+                  - "CodeBuildServiceRole"
+                  - "Arn"
+          Resource:
+            - Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}"
+            - Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}/*"
+          Sid: "WhitelistedGet"
+        - Action:
+          - "s3:PutObject"
+          Effect: "Allow"
+          Principal:
+            AWS:
+              - Fn::GetAtt:
+                  - "CodePipelineServiceRole"
+                  - "Arn"
+              - Fn::GetAtt:
+                  - "CodeBuildServiceRole"
+                  - "Arn"
+          Resource:
+            - Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}"
+            - Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}/*"
+          Sid: WhitelistedPut
+
+  CodePipelineSNSTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      Subscription:
+        - Endpoint: "marcuram@amazon.com"
+          Protocol: "email"
+  
+  AppPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      ArtifactStore:
+        Type: "S3"
+        Location:
+          Ref: "CodePipelineArtifactStoreBucket"
+      RoleArn:
+        Fn::GetAtt:
+          - "CodePipelineServiceRole"
+          - "Arn"
+      RestartExecutionOnUpdate: true
+      Stages:
+        - Name: "Source"
+          Actions:
+            - Name: "Source"
+              ActionTypeId:
+                Category: "Source"
+                Owner: "ThirdParty"
+                Version: "1"
+                Provider: "GitHub"
+              OutputArtifacts:
+                - Name: "SourceOutput"
+              Configuration:
+                Owner:
+                  Ref: "GitHubOwner"
+                Repo:
+                  Ref: "RepositoryName"
+                Branch:
+                  Ref: "BranchName"
+                OAuthToken:
+                  Ref: "GitHubOAuthToken"
+                PollForSourceChanges: false
+              RunOrder: 1
+        - Name: "Build"
+          Actions:
+            - Name: "Build"
+              ActionTypeId:
+                Category: "Build"
+                Owner: "AWS"
+                Version: "1"
+                Provider: "CodeBuild"
+              Configuration:
+                ProjectName:
+                  Ref: "CodeBuildProject"
+              InputArtifacts:
+                - Name: "SourceOutput"
+              OutputArtifacts:
+                - Name: "BuildOutput"
+              RunOrder: 1
+        - Name: "TestStage"
+          Actions:
+            - Name: "CreateTestStack"
+              ActionTypeId:
+                Category: "Deploy"
+                Owner: "AWS"
+                Provider: "CloudFormation"
+                Version: "1"
+              InputArtifacts:
+                - Name: "BuildOutput"
+              Configuration:
+                ActionMode: "CREATE_UPDATE"
+                RoleArn:
+                  Fn::GetAtt:
+                    - "CloudFormationServiceRole"
+                    - "Arn"
+                Capabilities: "CAPABILITY_AUTO_EXPAND,CAPABILITY_NAMED_IAM,CAPABILITY_IAM"
+                StackName:
+                  Fn::Sub:
+                    "TEST-${AWS::StackName}-${AWS::Region}"
+                TemplatePath: "BuildOutput::packaged.yaml"
+              RunOrder: 1
+            - Name: "ApproveTestStack"
+              ActionTypeId:
+                Category: "Approval"
+                Owner: "AWS"
+                Provider: "Manual"
+                Version: "1"
+              Configuration:
+                NotificationArn:
+                  Ref: "CodePipelineSNSTopic"
+                CustomData: "Do you want to create a change set against the production stack and delete the TEST stack?"
+              RunOrder: 2
+            - Name: "DeleteTestStack"
+              ActionTypeId:
+                Category: "Deploy"
+                Owner: "AWS"
+                Provider: "CloudFormation"
+                Version: "1"
+              Configuration:
+                ActionMode: "DELETE_ONLY"
+                RoleArn:
+                  Fn::GetAtt:
+                    - "CloudFormationServiceRole"
+                    - "Arn"
+                StackName:
+                  Fn::Sub:
+                    "TEST-${AWS::StackName}-${AWS::Region}"
+              RunOrder: 3
+        - Name: "ProdStage"
+          Actions:
+            - Name: "CreateChangeSetForProdStack"
+              ActionTypeId:
+                Category: "Deploy"
+                Owner: "AWS"
+                Provider: "CloudFormation"
+                Version: "1"
+              InputArtifacts:
+                - Name: "BuildOutput"
+              Configuration:
+                ActionMode: "CHANGE_SET_REPLACE"
+                RoleArn:
+                  Fn::GetAtt:
+                    - "CloudFormationServiceRole"
+                    - "Arn"
+                StackName:
+                  Fn::Sub:
+                    "PROD-${AWS::StackName}-${AWS::Region}"
+                ChangeSetName:
+                  Fn::Sub:
+                    "CHANGESET-PROD-${AWS::StackName}-${AWS::Region}"
+                TemplatePath: "BuildOutput::packaged.yaml"
+                Capabilities: "CAPABILITY_AUTO_EXPAND,CAPABILITY_NAMED_IAM,CAPABILITY_IAM"
+              RunOrder: 1
+            - Name: "ApproveChangeSet"
+              ActionTypeId:
+                Category: "Approval"
+                Owner: "AWS"
+                Provider: "Manual"
+                Version: "1"
+              Configuration:
+                NotificationArn:
+                  Ref: "CodePipelineSNSTopic"
+                CustomData: "A new change set was created for the PRODUCTION stack. Do you want to implement the changes?"
+              RunOrder: 2
+            - Name: "ExecuteChangeSet"
+              ActionTypeId:
+                Category: "Deploy"
+                Owner: "AWS"
+                Provider: "CloudFormation"
+                Version: "1"
+              Configuration:
+                ActionMode: "CHANGE_SET_EXECUTE"
+                RoleArn:
+                  Fn::GetAtt:
+                    - "CloudFormationServiceRole"
+                    - "Arn"
+                StackName:
+                  Fn::Sub:
+                    "PROD-${AWS::StackName}-${AWS::Region}"
+                ChangeSetName:
+                  Fn::Sub:
+                    "CHANGESET-PROD-${AWS::StackName}-${AWS::Region}"
+                TemplatePath: "BuildOutput::packaged.yaml"
+                Capabilities: "CAPABILITY_AUTO_EXPAND,CAPABILITY_NAMED_IAM,CAPABILITY_IAM"
+              RunOrder: 3
+
+  CloudFormationServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "cloudformation.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName:
+            Fn::Sub: "AWS-CFN-Service-Role-${AWS::StackName}-${AWS::Region}"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: "Allow"
+                Action: "*"
+
+  # "GitHubWebhook" satisfies two requirements:
+  # -- Means that updates are pushed from GitHub, rather than AWS having to poll
+  # -- Means we can filter for required changes
+  GithubWebhook:
+    Type: "AWS::CodePipeline::Webhook"
+    Properties:
+      Authentication: "GITHUB_HMAC"
+      AuthenticationConfiguration:
+        SecretToken:
+          Ref: "GitHubOAuthToken"
+      RegisterWithThirdParty: true
+      Filters:
+      - JsonPath: "$.ref"
+        MatchEquals: "refs/heads/{Branch}"
+      TargetPipeline:
+        Ref: "AppPipeline"
+      TargetAction: "Source"
+      TargetPipelineVersion:
+        Fn::GetAtt:
+          - "AppPipeline"
+          - "Version"
+
+  CodePipelineServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName:
+            Fn::Sub: "AWS-CodePipeline-Service-Role-${AWS::StackName}-${AWS::Region}"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "cloudformation:*"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "sns:Publish"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "codebuild:BatchGetBuilds"
+                  - "codebuild:StartBuild"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                  - "lambda:ListFunctions"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "iam:PassRole"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                Resource:
+                  Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}/*"
+
+  CodeBuildServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: "sts:AssumeRole"
+          Effect: "Allow"
+          Principal:
+            Service: "codebuild.amazonaws.com"
+      Path: /
+      Policies:
+        - PolicyName:
+            Fn::Sub: "AWS-CodeBuild-Service-Role-${AWS::StackName}-${AWS::Region}"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+              - Resource:
+                  - Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}"
+                  - Fn::Sub: "${CodePipelineArtifactStoreBucket.Arn}/*"
+                Effect: "Allow"
+                Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+              - Resource:
+                  Fn::Sub: "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:/alias/aws/s3"
+                Action:
+                  - "kms:GenerateDataKey*"
+                  - "kms:Encrypt"
+                  - "kms:Decrypt"
+                Effect: "Allow"
+
+  CodeBuildProject:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Artifacts:
+        Location:
+          Ref: "CodePipelineArtifactStoreBucket"
+        Type: S3
+      Source:
+        Location:
+          Fn::Sub: "${CodePipelineArtifactStoreBucket}/source.zip"
+        Type: "S3"
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - "pip install aws-sam-cli"
+                - "pip install cfn-lint"
+                - "ls -lhatr"
+                - "cfn-lint template.yaml"
+            build:
+              commands:
+                - "sam package --template-file template.yaml --s3-bucket ${ARTIFACT_BUCKET} --output-template-file packaged.yaml --region ${AWS_REGION}"
+            post_build:
+              commands:
+                - "echo done"
+          artifacts:
+            files: "packaged.yaml"
+      Environment:
+        ComputeType: "BUILD_GENERAL1_SMALL"
+        Image: "aws/codebuild/docker:1.12.1"
+        Type: "LINUX_CONTAINER"
+        EnvironmentVariables:
+          - Name: "AWS_REGION"
+            Value:
+              Ref: "AWS::Region"
+          - Name: "ARTIFACT_BUCKET"
+            Value:
+              Ref: "CodePipelineArtifactStoreBucket"
+      ServiceRole:
+        Ref: CodeBuildServiceRole

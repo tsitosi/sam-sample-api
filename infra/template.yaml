@@ -1,0 +1,138 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Transform: "AWS::Serverless-2016-10-31"
+
+Description: "Simple API Gateway, Lambda and DynamoDB Sample using Serverless Application Model."
+
+Parameters:
+
+  DomainName:
+    Type: "String"
+    Description: "Frontend domain name."
+    Default: "marcuram.myinstance.com"
+
+  # EnvironmentType:
+  #   Type: "String"
+  #   Description: "Environment Type"
+  #   AllowedValues:
+  #     - "prod"
+  #     - "dev"
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Runtime: "nodejs10.x"
+    Timeout: 10
+    Environment:
+      Variables:
+        TABLE_NAME:
+          Ref: "Table"
+
+Resources:
+
+  AppFunction:
+    Type: "AWS::Serverless::Function" # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      MemorySize: 128
+      Handler: "index.handler"
+      CodeUri: "../app/backend/"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName:
+              Ref: "Table"
+      Events:
+        GetItem:
+          Type: "Api" # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: "/item/{itemId}"
+            Method: "get"
+        PutItem:
+          Type: "Api"
+          Properties:
+            Path: "/item/{itemId}"
+            Method: "put"
+        DeleteItem:
+          Type: "Api"
+          Properties:
+            Path: "/item/{itemId}"
+            Method: "delete"
+
+  Table:
+    Type: "AWS::Serverless::SimpleTable" # More info about SimpleTable (DynamoDB): https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlesssimpletable
+    Properties:
+      SSESpecification:
+        SSEEnabled: true
+
+  FrontendS3Bucket:
+    Type: "AWS::S3::Bucket"
+    # DeletionPolicy: "Retain"
+    Properties:
+      BucketName:
+        Fn::Sub: "serverless-app.${DomainName}"
+      AccessControl: "Private"
+      WebsiteConfiguration:
+        IndexDocument: "index.html"
+        ErrorDocument: "error.html"
+  
+  FrontendS3BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket:
+        Ref: "FrontendS3Bucket"
+      PolicyDocument:
+        Version: "2008-10-17"
+        Id: "PolicyForCloudFrontPrivateContent"
+        Statement:
+          - Sid: "AllowsCloudFrontAccessS3FrontendBucket"
+            Effect: "Allow"
+            Principal:
+              CanonicalUser:
+                Fn::GetAtt: 
+                  - "CloudFrontOriginalAccessIdentity"
+                  - "S3CanonicalUserId"
+            Action: "s3:GetObject"
+            Resource:
+              - Fn::Sub: "${FrontendS3Bucket.Arn}"
+              - Fn::Sub: "${FrontendS3Bucket.Arn}/*"
+ 
+  CloudFrontOriginalAccessIdentity:
+    Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: "Allows private communication with Frontend S3 Bucket"
+
+  FrontendCloudFront:
+    Type: "AWS::CloudFront::Distribution"
+    Properties:
+      DistributionConfig:
+        HttpVersion: "http2"
+        Origins:
+          - DomainName:
+              Fn::GetAtt:
+                  - "FrontendS3Bucket"
+                  - "DomainName"
+            Id: "frontend_s3_bucket"
+            S3OriginConfig:
+              OriginAccessIdentity:
+                Fn::Sub: "origin-access-identity/cloudfront/${CloudFrontOriginalAccessIdentity}"
+        Enabled: True
+        DefaultRootObject: "index.html"
+        DefaultCacheBehavior:
+          ForwardedValues:
+            QueryString: False
+          TargetOriginId: "frontend_s3_bucket"
+          ViewerProtocolPolicy: "allow-all"
+
+Outputs:
+
+  ApiURL:
+    Description: "API endpoint URL for Prod environment"
+    Value:
+      Fn::Sub: "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/item/"
+
+  CloudFrontURL:
+    Value:
+      Fn::GetAtt:
+        - "FrontendCloudFront"
+        - "DomainName"
