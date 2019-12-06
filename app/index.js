@@ -23,7 +23,6 @@ const get = (event, context, callback) => {
             callback(null, createResponse(404, "ITEM NOT FOUND"));
             return;
         }
-        console.log('TEST');
         console.log(`RETRIEVED ITEM SUCCESSFULLY WITH doc = ${data.Item.doc}`);
         callback(null, createResponse(200, data.Item.doc));
     }).catch( (err) => { 
